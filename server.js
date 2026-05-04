@@ -12,12 +12,18 @@ app.use(express.static('.'));
 // --- GEMINI SETUP ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// --- EMAIL SETUP ---
+// --- EMAIL SETUP (Aktualisiert für Cloud-Deployment) ---
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true, // Nutzt SSL für Port 465
     auth: {
         user: 'Faimzee@gmail.com',
         pass: process.env.EMAIL_PASS 
+    },
+    tls: {
+        // Erlaubt die Verbindung auch bei Zertifikats-Unstimmigkeiten in Cloud-Umgebungen
+        rejectUnauthorized: false 
     }
 });
 
@@ -56,24 +62,21 @@ app.post('/api/reklamation', upload.single('document'), async (req, res) => {
         Wurde ein Bild/Dokument angehängt?: ${file ? "JA" : "NEIN"}
 
         Deine Aufgaben:
-        1. BILDANALYSE (Falls ein Bild vorhanden ist): Beschreibe kurz, was auf dem Bild zu sehen ist. Schätze kritisch ein, ob das Gesehene zur Reklamation passt (z.B. Ist ein Riss am Knie wirklich ein Materialfehler oder normaler Verschleiß? Handelt es sich wirklich um den angegebenen Artikel?). Falls kein Bild angehängt wurde, schreibe "Kein Bild zur Prüfung eingereicht".
-        2. PLAUSIBILITÄT: Prüfe logisch, ob diese Reklamation Sinn macht (Kaufdatum, Grund, deine Bildanalyse).
-        3. STIMMUNG & PRIORITÄT: Analysiere die Stimmung und leite eine Priorität ab (HOCH, MITTEL, NIEDRIG oder PRÜFUNG NÖTIG).
-        4. KUNDENANTWORT (Website): Eine sehr kurze Bestätigung (max 2 Sätze) für den Browser ("Ticket ist eingegangen..."). Sprich den Kunden mit Namen an.
-        5. SUPPORT-ENTWURF: Schreibe eine vollständige E-Mail, die der Support-Mitarbeiter 1:1 kopieren und senden kann. 
-           - Sprich den Kunden persönlich an (z.B. "Hallo ${data.fullName}").
-           - Wenn PLAUSIBEL: Entschuldige dich für den Defekt und kündige z.B. einen kostenlosen Ersatz an.
-           - Wenn UNPLAUSIBEL (z.B. Bild zeigt puren Verschleiß): Formuliere eine FREUNDLICHE ABLEHNUNG im Strauss-Stil ('Workwear-Valley', 'Macher'). Gehe dabei zwingend auf das ein, was du auf dem Bild gesehen hast!
+        1. BILDANALYSE: Beschreibe kurz das Bild und prüfe die Relevanz zur Reklamation.
+        2. PLAUSIBILITÄT: Prüfe logisch, ob die Reklamation Sinn macht.
+        3. STIMMUNG & PRIORITÄT: Analysiere die Stimmung und setze HOCH, MITTEL oder NIEDRIG.
+        4. KUNDENANTWORT: Kurze Bestätigung für die Website.
+        5. SUPPORT-ENTWURF: Schreibe eine fertige E-Mail an den Kunden inkl. persönlicher Anrede.
 
         Antworte AUSSCHLIESSLICH in folgendem JSON-Format:
         {
-            "bildAnalyse": "Deine Einschätzung zum Bild",
+            "bildAnalyse": "...",
             "plausibel": true oder false,
-            "kiEinschaetzung": "Deine interne Begründung zur Plausibilität inkl. Bildbewertung",
+            "kiEinschaetzung": "...",
             "stimmung": "...",
             "prioritaet": "...",
             "kundenAntwort": "...",
-            "supportAntwortEntwurf": "Die komplette, fertige E-Mail an den Kunden"
+            "supportAntwortEntwurf": "..."
         }`;
 
         const requestContent = [promptText];
@@ -85,11 +88,11 @@ app.post('/api/reklamation', upload.single('document'), async (req, res) => {
         
         console.log(`KI Analyse | Prio: ${aiData.prioritaet} | Plausibel: ${aiData.plausibel}`);
 
-        // Email Versand vorbereiten (MIT optionalem Personaler-CC)
+        // Email Versand
         const mailOptions = {
             from: 'Strauss Support Bot <Faimzee@gmail.com>',
-            to: 'Faimzee@gmail.com', // Geht immer an dich als Support-Zentrale
-            cc: data.testEmail ? data.testEmail : undefined, // FÜGT DEN PERSONALER HINZU, WENN AUSGEFÜLLT!
+            to: 'Faimzee@gmail.com',
+            cc: data.testEmail ? data.testEmail : undefined,
             subject: `[${aiData.prioritaet}] ${!aiData.plausibel ? '⚠️ ABLEHNUNG PRÜFEN: ' : ''}Reklamation für Artikel ${data.articleNumber}`,
             text: `Reklamations-Details:\n
             Kunde: ${data.fullName}
@@ -103,28 +106,29 @@ app.post('/api/reklamation', upload.single('document'), async (req, res) => {
             Freie Bemerkung: "${data.remarks || "Keine"}"\n
             ------------------------------------------
             🤖 KI-TICKET-ANALYSE:
-            Stimmung des Kunden: ${aiData.stimmung}
-            Abgeleitete Priorität: ${aiData.prioritaet}
+            Stimmung: ${aiData.stimmung}
+            Priorität: ${aiData.prioritaet}
             
-            🖼️ BILD- / DOKUMENTENANALYSE:
+            🖼️ BILDANALYSE:
             ${aiData.bildAnalyse}
 
-            🔍 PLAUSIBILITÄTSPRÜFUNG:
-            Ist die Reklamation logisch/plausibel?: ${aiData.plausibel ? "✅ JA" : "❌ NEIN (Verdachtsfall / Kein Garantiefall)"}
-            Begründung der KI: "${aiData.kiEinschaetzung}"
+            🔍 PLAUSIBILITÄT:
+            Plausibel?: ${aiData.plausibel ? "✅ JA" : "❌ NEIN"}
+            Begründung: "${aiData.kiEinschaetzung}"
             ------------------------------------------
-            ✉️ KI-ENTWURF FÜR DEINE ANTWORT-EMAIL:
-            (Einfach kopieren und an den Kunden senden)
-            
+            ✉️ KI-ENTWURF:
             ${aiData.supportAntwortEntwurf}
             ------------------------------------------\n
-            Sofort-Antwort auf der Website war:\n${aiData.kundenAntwort}`,
+            Sofort-Antwort: ${aiData.kundenAntwort}`,
             attachments: file ? [{ filename: file.originalname, content: file.buffer }] : []
         };
 
         transporter.sendMail(mailOptions, (error, info) => {
-            if (error) console.log("Mail-Fehler:", error);
-            else console.log("Email erfolgreich versandt!");
+            if (error) {
+                console.log("Mail-Fehler:", error);
+            } else {
+                console.log("Email erfolgreich versandt!");
+            }
         });
 
         res.status(200).json({ status: 'success', aiMsg: aiData.kundenAntwort });
@@ -137,10 +141,5 @@ app.post('/api/reklamation', upload.single('document'), async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`--------------------------------------------------`);
-    console.log(`🚀 Server läuft auf http://localhost:${PORT}`);
-    console.log(`🧠 KI-Copilot: AKTIVIERT`);
-    console.log(`👁️ Multimodale Bilderkennung: AKTIVIERT`);
-    console.log(`📬 Personaler-Test-Routing: AKTIVIERT`);
-    console.log(`--------------------------------------------------`);
+    console.log(`Server läuft auf Port ${PORT}`);
 });
