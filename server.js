@@ -12,26 +12,21 @@ app.use(express.static('.'));
 // --- GEMINI SETUP ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// --- EMAIL SETUP (Optimiert für Render-Cloud) ---
+// --- EMAIL SETUP (Letzter Versuch: Port 2525 Joker) ---
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 587, // Wechsel auf Port 587
-    secure: false, // false für Port 587 (nutzt STARTTLS)
+    port: 2525, // Port 2525 wird oft nicht blockiert
+    secure: false, 
     auth: {
         user: 'Faimzee@gmail.com',
         pass: process.env.EMAIL_PASS 
     },
-    // DNS-Fix bleibt aktiv
-    dns: {
-        family: 4
-    },
-    // Erweiterte Timeouts gegen Verbindungsabbrüche
-    connectionTimeout: 20000, 
-    greetingTimeout: 20000,
-    socketTimeout: 20000,
+    dns: { family: 4 },
+    connectionTimeout: 30000, // Erhöht auf 30 Sek
+    greetingTimeout: 30000,
+    socketTimeout: 30000,
     tls: {
-        rejectUnauthorized: false,
-        minVersion: 'TLSv1.2'
+        rejectUnauthorized: false
     }
 });
 
@@ -59,31 +54,11 @@ app.post('/api/reklamation', upload.single('document'), async (req, res) => {
             };
         }
 
-        const promptText = `Du bist der Kundenservice-Bot von Engelbert Strauss. 
-        Heute ist der ${heute}. Der Kunde ${data.fullName || "Ein Kunde"} hat eine Reklamation eingereicht.
-        
-        Produktgruppe: ${data.product || "Nicht angegeben"}
-        Artikelnummer: ${data.articleNumber || "Nicht angegeben"}
-        Kaufdatum: ${data.date || "Nicht angegeben"}
-        Grund: ${data.reason || "Nicht angegeben"}
-        Bemerkung: "${data.remarks || "Keine"}"
-
-        Aufgaben:
-        1. BILDANALYSE: Falls vorhanden, beschreibe kurz das Foto.
-        2. PLAUSIBILITÄT: Ist der Fall logisch nachvollziehbar?
-        3. STIMMUNG: Wie ist der Tonfall des Kunden?
-        4. SUPPORT-ENTWURF: Schreibe eine freundliche Antwort-E-Mail (Strauss-Stil: Macher, Workwear-Valley).
-
-        Antworte NUR als JSON:
-        {
-            "bildAnalyse": "...",
-            "plausibel": true/false,
-            "kiEinschaetzung": "...",
-            "stimmung": "...",
-            "prioritaet": "HOCH/MITTEL/NIEDRIG",
-            "kundenAntwort": "Kurze Info für Website",
-            "supportAntwortEntwurf": "Vollständige E-Mail"
-        }`;
+        const promptText = `Du bist der Kundenservice-Bot von Engelbert Strauss. Analysiere diese Reklamation:
+        Kunde: ${data.fullName}
+        Produkt: ${data.product} (${data.articleNumber})
+        Grund: ${data.reason}
+        Bemerkung: ${data.remarks}`;
 
         const requestContent = [promptText];
         if (imagePart) requestContent.push(imagePart);
@@ -92,34 +67,21 @@ app.post('/api/reklamation', upload.single('document'), async (req, res) => {
         const aiResponseText = result.response.text();
         const aiData = JSON.parse(aiResponseText);
         
-        console.log(`KI Analyse | Prio: ${aiData.prioritaet} | Plausibel: ${aiData.plausibel}`);
+        console.log(`KI Analyse fertig | Prio: ${aiData.prioritaet}`);
 
-        // Email Versand
         const mailOptions = {
             from: 'Strauss Support Bot <Faimzee@gmail.com>',
             to: 'Faimzee@gmail.com',
             cc: data.testEmail ? data.testEmail : undefined,
             subject: `[${aiData.prioritaet}] Reklamation: ${data.articleNumber}`,
-            text: `Neue Reklamation von: ${data.fullName}\n
-            E-Mail: ${data.email}
-            Adresse: ${data.street}, ${data.city}
-            Produkt: ${data.product} (${data.articleNumber})
-            Kaufdatum: ${data.date}
-            
-            KI-Einschätzung: ${aiData.kiEinschaetzung}
-            Plausibel: ${aiData.plausibel ? "Ja" : "Nein"}
-            
-            Vorgeschlagene Antwort an Kunden:
-            ----------------------------------
-            ${aiData.supportAntwortEntwurf}
-            ----------------------------------`,
+            text: `Neue Reklamation von: ${data.fullName}\nKI-Einschätzung: ${aiData.kiEinschaetzung}\n\nEntwurf:\n${aiData.supportAntwortEntwurf}`,
             attachments: file ? [{ filename: file.originalname, content: file.buffer }] : []
         };
 
-        // Versuch den Versand durchzuführen
+        // Mail senden
         transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
-                console.log("Mail-Fehler:", error);
+                console.log("Mail-Fehler (Port 2525):", error);
             } else {
                 console.log("Email erfolgreich versandt!");
             }
