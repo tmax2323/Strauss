@@ -1,6 +1,6 @@
 const express = require('express');
 const multer = require('multer');
-const axios = require('axios'); // Wir nutzen axios für den API-Call
+const axios = require('axios');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 require('dotenv').config();
 
@@ -18,18 +18,22 @@ app.post('/api/reklamation', upload.single('document'), async (req, res) => {
         const data = req.body;
         const file = req.file;
 
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
         const promptText = `Analysiere diese Reklamation für Engelbert Strauss und antworte NUR im JSON-Format:
         Kunde: ${data.fullName}, Artikel: ${data.articleNumber}, Grund: ${data.reason}, Bemerkung: ${data.remarks}.
         Struktur: {"prioritaet":"HOCH/MITTEL/NIEDRIG", "plausibel":true/false, "kiEinschaetzung":"...", "kundenAntwort":"...", "supportAntwortEntwurf":"...", "bildAnalyse":"..."}`;
 
         const result = await model.generateContent([promptText, file ? { inlineData: { data: file.buffer.toString("base64"), mimeType: file.mimetype }} : null].filter(Boolean));
-        const aiData = JSON.parse(result.response.text().replace(/```json|
-```/g, ""));
+        
+        // REPARIERTE ZEILE:
+        const rawText = result.response.text();
+        const cleanJson = rawText.replace(/```json|
+```/g, "").trim();
+        const aiData = JSON.parse(cleanJson);
         
         console.log(`KI Analyse fertig | Prio: ${aiData.prioritaet}`);
 
-        // --- BREVO API CALL (Ersatzt für Nodemailer/SMTP) ---
+        // --- BREVO API CALL ---
         const emailPayload = {
             sender: { name: "Strauss Support Bot", email: "Faimzee@gmail.com" },
             to: [{ email: "Faimzee@gmail.com" }],
@@ -62,5 +66,5 @@ app.post('/api/reklamation', upload.single('document'), async (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000; // Render nutzt oft Port 10000
 app.listen(PORT, () => console.log(`Server läuft auf Port ${PORT}`));
