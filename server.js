@@ -12,17 +12,21 @@ app.use(express.static('.'));
 // --- GEMINI SETUP ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// --- EMAIL SETUP (Aktualisiert für Cloud-Deployment) ---
+// --- EMAIL SETUP (Fix für ENETUNREACH / IPv6 Probleme auf Render) ---
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 465,
-    secure: true, // Nutzt SSL für Port 465
+    secure: true, // SSL für Port 465
     auth: {
         user: 'Faimzee@gmail.com',
         pass: process.env.EMAIL_PASS 
     },
+    // DNS-Fix: Zwingt Node.js IPv4 zu nutzen statt IPv6
+    dns: {
+        family: 4
+    },
+    connectionTimeout: 10000, // 10 Sekunden Zeit für den Verbindungsaufbau
     tls: {
-        // Erlaubt die Verbindung auch bei Zertifikats-Unstimmigkeiten in Cloud-Umgebungen
         rejectUnauthorized: false 
     }
 });
@@ -51,32 +55,30 @@ app.post('/api/reklamation', upload.single('document'), async (req, res) => {
             };
         }
 
-        const promptText = `Du bist der Kundenservice- und Qualitätsprüfer-Bot von Engelbert Strauss. 
-        Heute ist der ${heute}. Der Kunde ${data.fullName || "Ein Kunde"} hat folgende Reklamation eingereicht:
+        const promptText = `Du bist der Kundenservice-Bot von Engelbert Strauss. 
+        Heute ist der ${heute}. Der Kunde ${data.fullName || "Ein Kunde"} hat eine Reklamation eingereicht.
         
         Produktgruppe: ${data.product || "Nicht angegeben"}
         Artikelnummer: ${data.articleNumber || "Nicht angegeben"}
         Kaufdatum: ${data.date || "Nicht angegeben"}
         Grund: ${data.reason || "Nicht angegeben"}
-        Freie Bemerkung des Kunden: "${data.remarks || "Keine"}"
-        Wurde ein Bild/Dokument angehängt?: ${file ? "JA" : "NEIN"}
+        Bemerkung: "${data.remarks || "Keine"}"
 
-        Deine Aufgaben:
-        1. BILDANALYSE: Beschreibe kurz das Bild und prüfe die Relevanz zur Reklamation.
-        2. PLAUSIBILITÄT: Prüfe logisch, ob die Reklamation Sinn macht.
-        3. STIMMUNG & PRIORITÄT: Analysiere die Stimmung und setze HOCH, MITTEL oder NIEDRIG.
-        4. KUNDENANTWORT: Kurze Bestätigung für die Website.
-        5. SUPPORT-ENTWURF: Schreibe eine fertige E-Mail an den Kunden inkl. persönlicher Anrede.
+        Aufgaben:
+        1. BILDANALYSE: Falls vorhanden, beschreibe kurz das Foto.
+        2. PLAUSIBILITÄT: Ist der Fall logisch nachvollziehbar?
+        3. STIMMUNG: Wie ist der Tonfall des Kunden?
+        4. SUPPORT-ENTWURF: Schreibe eine freundliche Antwort-E-Mail (Strauss-Stil: Macher, Workwear-Valley).
 
-        Antworte AUSSCHLIESSLICH in folgendem JSON-Format:
+        Antworte NUR als JSON:
         {
             "bildAnalyse": "...",
-            "plausibel": true oder false,
+            "plausibel": true/false,
             "kiEinschaetzung": "...",
             "stimmung": "...",
-            "prioritaet": "...",
-            "kundenAntwort": "...",
-            "supportAntwortEntwurf": "..."
+            "prioritaet": "HOCH/MITTEL/NIEDRIG",
+            "kundenAntwort": "Kurze Info für Website",
+            "supportAntwortEntwurf": "Vollständige E-Mail"
         }`;
 
         const requestContent = [promptText];
@@ -93,33 +95,20 @@ app.post('/api/reklamation', upload.single('document'), async (req, res) => {
             from: 'Strauss Support Bot <Faimzee@gmail.com>',
             to: 'Faimzee@gmail.com',
             cc: data.testEmail ? data.testEmail : undefined,
-            subject: `[${aiData.prioritaet}] ${!aiData.plausibel ? '⚠️ ABLEHNUNG PRÜFEN: ' : ''}Reklamation für Artikel ${data.articleNumber}`,
-            text: `Reklamations-Details:\n
-            Kunde: ${data.fullName}
+            subject: `[${aiData.prioritaet}] Reklamation: ${data.articleNumber}`,
+            text: `Neue Reklamation von: ${data.fullName}\n
             E-Mail: ${data.email}
             Adresse: ${data.street}, ${data.city}
-            
-            Produkt: ${data.product}
-            Artikelnummer: ${data.articleNumber}
+            Produkt: ${data.product} (${data.articleNumber})
             Kaufdatum: ${data.date}
-            Grund: ${data.reason}
-            Freie Bemerkung: "${data.remarks || "Keine"}"\n
-            ------------------------------------------
-            🤖 KI-TICKET-ANALYSE:
-            Stimmung: ${aiData.stimmung}
-            Priorität: ${aiData.prioritaet}
             
-            🖼️ BILDANALYSE:
-            ${aiData.bildAnalyse}
-
-            🔍 PLAUSIBILITÄT:
-            Plausibel?: ${aiData.plausibel ? "✅ JA" : "❌ NEIN"}
-            Begründung: "${aiData.kiEinschaetzung}"
-            ------------------------------------------
-            ✉️ KI-ENTWURF:
+            KI-Einschätzung: ${aiData.kiEinschaetzung}
+            Plausibel: ${aiData.plausibel ? "Ja" : "Nein"}
+            
+            Vorgeschlagene Antwort an Kunden:
+            ----------------------------------
             ${aiData.supportAntwortEntwurf}
-            ------------------------------------------\n
-            Sofort-Antwort: ${aiData.kundenAntwort}`,
+            ----------------------------------`,
             attachments: file ? [{ filename: file.originalname, content: file.buffer }] : []
         };
 
