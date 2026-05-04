@@ -12,22 +12,26 @@ app.use(express.static('.'));
 // --- GEMINI SETUP ---
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// --- EMAIL SETUP (Fix für ENETUNREACH / IPv6 Probleme auf Render) ---
+// --- EMAIL SETUP (Optimiert für Render-Cloud) ---
 const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
-    port: 465,
-    secure: true, // SSL für Port 465
+    port: 587, // Wechsel auf Port 587
+    secure: false, // false für Port 587 (nutzt STARTTLS)
     auth: {
         user: 'Faimzee@gmail.com',
         pass: process.env.EMAIL_PASS 
     },
-    // DNS-Fix: Zwingt Node.js IPv4 zu nutzen statt IPv6
+    // DNS-Fix bleibt aktiv
     dns: {
         family: 4
     },
-    connectionTimeout: 10000, // 10 Sekunden Zeit für den Verbindungsaufbau
+    // Erweiterte Timeouts gegen Verbindungsabbrüche
+    connectionTimeout: 20000, 
+    greetingTimeout: 20000,
+    socketTimeout: 20000,
     tls: {
-        rejectUnauthorized: false 
+        rejectUnauthorized: false,
+        minVersion: 'TLSv1.2'
     }
 });
 
@@ -112,6 +116,7 @@ app.post('/api/reklamation', upload.single('document'), async (req, res) => {
             attachments: file ? [{ filename: file.originalname, content: file.buffer }] : []
         };
 
+        // Versuch den Versand durchzuführen
         transporter.sendMail(mailOptions, (error, info) => {
             if (error) {
                 console.log("Mail-Fehler:", error);
